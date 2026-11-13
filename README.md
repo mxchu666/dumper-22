@@ -82,7 +82,8 @@ the profile is stale. On a new build: run it, paste the values into
 ## Status
 
 - `Dumper-7.dll` compiles clean (MSVC 19.51, x64 Release).
-- All 42.40 constants verified against `FortniteClient-Win64-Shipping.exe` twice: Hex-Rays-style
-  disassembly of the decode sites and `tools/verify_profile.py`.
+- All 42.40 constants verified against `FortniteClient-Win64-Shipping.exe` three ways: raw
+  disassembly of the decode sites, `tools/verify_profile.py`, and Hex-Rays in IDA
+  (`sub_...1002` for the object array, `sub_...50D90` for `FName::ToString`).
 - Not run inside a live client from this machine — the injection and the in-game dump still need
   a run on your side.
