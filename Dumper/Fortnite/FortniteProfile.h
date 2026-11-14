@@ -38,6 +38,10 @@ namespace Fortnite
 		/* true when the object array and FName ids are stored obfuscated. */
 		bool bObfuscated;
 
+		/* true when every decoded word is also byte-swapped (42.40); false when the
+		 * obfuscation is a plain XOR (38.00). */
+		bool bByteSwap;
+
 		/* FUObjectArray */
 		int32_t  GObjectsRVA;
 		int32_t  ElementsPerChunk;

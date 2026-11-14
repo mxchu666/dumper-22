@@ -20,20 +20,23 @@ namespace
 			.Build = EBuild::v38_00,
 			.Name = "Fortnite 38.00-CL-47722112",
 			.ImageSize = 0x18777000,
-			.bObfuscated = false,
-			.GObjectsRVA = -1,			// plain build, the auto-finder resolves everything
+			.bObfuscated = true,
+			.bByteSwap = false,
+			.GObjectsRVA = 0x16CFAF80,
 			.ElementsPerChunk = 0x10000,
-			.ObjectsKey = 0x0,
-			.NumElementsKey = 0x0,
-			.ItemKey = 0x0,
-			.ItemKeepMask = 0x0,
-			.ItemFreeTagMask = 0x0,
-			.ItemEncodedLowOffset = -1,
-			.ItemSize = 0x0,
-			.FNameKey = 0x0,
-			.ToStringRVA = -1,
-			.GNamesRVA = -1,
-			.NamePoolBlocksOffset = 0x0,
+			.ObjectsKey = 0xFFFFFFFF40F0F3B4ull,
+			.NumElementsKey = 0xFF3B3CEBu,
+			.ItemKey = 0xCC9E16DBu,
+			.ItemKeepMask = 0x3FFF00000000ull,
+			.ItemFreeTagMask = 0x1020000000000000ull,
+			.ItemEncodedLowOffset = 0x08,
+			.ItemSize = 0x18,
+			.FNameKey = 0x6F01622Bu,
+			.ToStringRVA = 0x5E10,
+			.GNamesRVA = 0x16C1C5C0,
+			.NamePoolBlocksOffset = 0x10,
+			/* UObject keeps the stock UE5 layout; only the array and the names are
+			 * obfuscated, so the finder resolves these at runtime. */
 			.UObjectName = -1,
 			.UObjectFlags = -1,
 			.UObjectIndex = -1,
@@ -45,6 +48,7 @@ namespace
 			.Name = "Fortnite 42.40-CL-59343437",
 			.ImageSize = 0x1CAD0000,
 			.bObfuscated = true,
+			.bByteSwap = true,
 			.GObjectsRVA = 0x1B028040,
 			.ElementsPerChunk = 0x10000,
 			.ObjectsKey = 0xAB47766400000000ull,
@@ -88,11 +92,24 @@ namespace
 
 	/*
 	 * The generated SDK has to reproduce both decryptors as well, or an SDK built from a
-	 * 42.40 dump would read garbage object pointers at runtime. Written without intrinsics
-	 * so the emitted code compiles without extra includes.
+	 * dump would read garbage object pointers at runtime. Written without intrinsics so
+	 * the emitted code compiles without extra includes.
+	 *
+	 * bByteSwap decides between the two families seen so far:
+	 *   38.00  plain XOR
+	 *   42.40  XOR followed by a byte swap
 	 */
 	std::string MakeObjectArrayDecryptorString(const FBuildProfile& P)
 	{
+		if (!P.bByteSwap)
+		{
+			return std::format(
+				"[](void* ObjPtr) -> uint8*\n"
+				"\t{{\n"
+				"\t\treturn reinterpret_cast<uint8*>(static_cast<uintptr_t>(reinterpret_cast<uintptr_t>(ObjPtr) ^ 0x{:X}ull));\n"
+				"\t}}", P.ObjectsKey);
+		}
+
 		return std::format(
 			"[](void* ObjPtr) -> uint8*\n"
 			"\t{{\n"
@@ -107,6 +124,20 @@ namespace
 
 	std::string MakeItemDecryptorString(const FBuildProfile& P)
 	{
+		if (!P.bByteSwap)
+		{
+			return std::format(
+				"[](void* ItemPtr) -> class UObject*\n"
+				"\t{{\n"
+				"\t\tconst uint8* Item = static_cast<const uint8*>(ItemPtr);\n"
+				"\t\tconst uint64 Raw = *reinterpret_cast<const uint64*>(Item);\n"
+				"\t\tif (Raw & 0x{:X}ull)\n"
+				"\t\t\treturn nullptr;\n"
+				"\t\tconst uint32 Plain = *reinterpret_cast<const uint32*>(Item + 0x{:X}) ^ 0x{:X}u;\n"
+				"\t\treturn reinterpret_cast<class UObject*>(static_cast<uintptr_t>(((Raw & 0x{:X}ull) | Plain) << 3));\n"
+				"\t}}", P.ItemFreeTagMask, P.ItemEncodedLowOffset, P.ItemKey, P.ItemKeepMask);
+		}
+
 		return std::format(
 			"[](void* ItemPtr) -> class UObject*\n"
 			"\t{{\n"
@@ -130,12 +161,14 @@ namespace
 
 		ObjectArray::InitDecryption([](void* ObjPtr) -> uint8*
 		{
-			return reinterpret_cast<uint8*>(ByteSwap64(static_cast<uint64>(reinterpret_cast<uintptr_t>(ObjPtr)) ^ Active->ObjectsKey));
+			const uint64 Value = static_cast<uint64>(reinterpret_cast<uintptr_t>(ObjPtr)) ^ Active->ObjectsKey;
+			return reinterpret_cast<uint8*>(static_cast<uintptr_t>(Active->bByteSwap ? ByteSwap64(Value) : Value));
 		}, ObjectArrayDecryptor.c_str());
 
 		ObjectArray::InitIntDecryption([](int32 Value) -> int32
 		{
-			return static_cast<int32>(ByteSwap32(static_cast<uint32>(Value) ^ Active->NumElementsKey));
+			const uint32 Decoded = static_cast<uint32>(Value) ^ Active->NumElementsKey;
+			return static_cast<int32>(Active->bByteSwap ? ByteSwap32(Decoded) : Decoded);
 		});
 
 		ObjectArray::InitObjectPtrDecryption([](uint8* ItemPtr, uint32 ItemOffset) -> void*
@@ -147,7 +180,8 @@ namespace
 				return nullptr;
 
 			const uint32 EncryptedLow = *reinterpret_cast<const uint32*>(ItemPtr + ItemOffset + Active->ItemEncodedLowOffset);
-			const uint64 Decoded = (Raw & Active->ItemKeepMask) | ByteSwap32(EncryptedLow ^ Active->ItemKey);
+			const uint32 Low = EncryptedLow ^ Active->ItemKey;
+			const uint64 Decoded = (Raw & Active->ItemKeepMask) | (Active->bByteSwap ? ByteSwap32(Low) : Low);
 
 			return reinterpret_cast<void*>(Decoded << 3);
 		});
@@ -215,7 +249,8 @@ namespace Fortnite
 		if (!Active || RawId == 0)
 			return 0u;
 
-		return ByteSwap32((RawId - 1u) ^ Active->FNameKey) + 1u;
+		const uint32_t Decoded = (RawId - 1u) ^ Active->FNameKey;
+		return (Active->bByteSwap ? ByteSwap32(Decoded) : Decoded) + 1u;
 	}
 
 	bool HasObfuscatedFNames()
