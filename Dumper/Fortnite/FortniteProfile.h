@@ -6,8 +6,18 @@
  * Per-build knowledge for the Fortnite client.
  *
  * Everything here was read out of the shipping executables:
- *   38.00-CL-47722112  SizeOfImage 0x18777000  (plain UE layout, auto-finder works)
+ *   38.00-CL-47722112  SizeOfImage 0x18777000  (obfuscated FUObjectArray + FName ids,
+ *                                               rotated UObject, XOR only, entry chars
+ *                                               XORed with a length-seeded stream)
  *   42.40-CL-59343437  SizeOfImage 0x1CAD0000  (obfuscated FUObjectArray + FName ids)
+ *
+ * The 38.00 decode sites, all verified against FortniteClient-Win64-Shipping.exe:
+ *   FUObjectArray::ObjObjects.Objects  RVA 0x16CFAF80  x ^ 0xFFFFFFFF40F0F3B4
+ *   FUObjectArray::ObjObjects.NumElements RVA 0x16CFAF94  x ^ 0xFF3B3CEB
+ *   lookup helper                       RVA 0x1247A  index -> FUObjectItem* -> UObject*
+ *   FName::ToString                     RVA 0x5E10   ((x-1) ^ 0x6F01622B) + 1, pool at
+ *                                                    GNames+0x10, entry chars XORed
+ *   FNameEntry::AppendString            RVA 0x127D310
  *
  * The 42.40 decode sites, all verified against FortniteClient-Win64-Shipping.exe:
  *   FUObjectArray::ObjObjects.Objects  RVA 0x1B028040  bswap64(x ^ 0xAB47766400000000)
@@ -42,9 +52,12 @@ namespace Fortnite
 		 * obfuscation is a plain XOR (38.00). */
 		bool bByteSwap;
 
+		/* true when FName::ToString appends into the cursor-based 5.7 string
+		 * { Data, Cursor, End, bOwnsAllocator } instead of an FString. */
+		bool bCursorString;
+
 		/* FUObjectArray */
-		int32_t  GObjectsRVA;
-		int32_t  ElementsPerChunk;
+		int32_t  GObjectsRVA;		int32_t  ElementsPerChunk;
 		uint64_t ObjectsKey;
 		uint32_t NumElementsKey;
 		uint32_t ItemKey;

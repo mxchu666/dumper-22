@@ -241,13 +241,14 @@ void FName::Init(int32 OverrideOffset, EOffsetOverrideType OverrideType, bool bI
 
 	ToStr = [](const void* Name) -> std::wstring
 	{
+		const Fortnite::FBuildProfile* Profile = Fortnite::HasObfuscatedFNames() ? Fortnite::GetProfile() : nullptr;
+
 		/* Builds with obfuscated FName ids (Fortnite 42.40+) decode the id inside the game's
 		 * ToString, which then indexes the pool without checking it. A stale or half-written
 		 * FName decodes to a chunk that was never allocated and faults the host process, so
 		 * the id is validated here first. */
-		if (Fortnite::HasObfuscatedFNames())
+		if (Profile)
 		{
-			const Fortnite::FBuildProfile* Profile = Fortnite::GetProfile();
 			const uint32 RawId = *reinterpret_cast<const uint32*>(Name);
 			const uint32 Id = Fortnite::DecodeFNameId(RawId);
 			const uint32 ChunkIndex = Id >> 16;
@@ -274,6 +275,23 @@ void FName::Init(int32 OverrideOffset, EOffsetOverrideType OverrideType, bool bI
 
 				return L"<invalid>";
 			}
+		}
+
+		if (Profile && Profile->bCursorString)
+		{
+			/* The engine appends at Cursor, bounds the write with End, and only frees on
+			 * destruction when bOwnsAllocator is set. A name longer than the buffer makes
+			 * it allocate its own; that allocation is leaked here on purpose. */
+			thread_local FNameCursorBuffer Buffer;
+
+			Buffer.Str.Data = Buffer.Chars;
+			Buffer.Str.Cursor = Buffer.Chars;
+			Buffer.Str.End = Buffer.Chars + (sizeof(Buffer.Chars) / sizeof(Buffer.Chars[0]));
+			Buffer.Str.bOwnsAllocator = false;
+
+			AppendString(Name, *reinterpret_cast<FString*>(&Buffer.Str));
+
+			return std::wstring(Buffer.Str.Data, Buffer.Str.Cursor);
 		}
 
 		thread_local FFreableString TempString(1024);

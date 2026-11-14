@@ -65,6 +65,26 @@ private:
 	}
 };
 
+/*
+ * The string FName::ToString appends into on 5.7 builds is NOT an FString there.
+ * It is cursor-based: { Data, Cursor, End, bOwnsAllocator }. Reading it as
+ * { Data, Num, Max } makes the engine write at (Num | Max << 32), which is how
+ * 38.00 died at AppendString's store with an address of 0x1DC00000000.
+ */
+struct FNameCursorString
+{
+	wchar_t* Data;
+	wchar_t* Cursor;
+	wchar_t* End;
+	bool     bOwnsAllocator;
+};
+
+struct FNameCursorBuffer
+{
+	wchar_t Chars[1024] = {};
+	FNameCursorString Str;
+};
+
 class FName
 {
 public:
