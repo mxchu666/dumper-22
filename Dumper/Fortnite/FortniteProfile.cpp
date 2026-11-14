@@ -35,13 +35,16 @@ namespace
 			.ToStringRVA = 0x5E10,
 			.GNamesRVA = 0x16C1C5C0,
 			.NamePoolBlocksOffset = 0x10,
-			/* UObject keeps the stock UE5 layout; only the array and the names are
-			 * obfuscated, so the finder resolves these at runtime. */
-			.UObjectName = -1,
-			.UObjectFlags = -1,
-			.UObjectIndex = -1,
-			.UObjectClass = -1,
-			.UObjectOuter = -1,
+			/* UObject is rotated relative to stock UE5 in this build: Outer comes
+			 * before the flags, and Name sits after Class. Measured, not assumed:
+			 * the runtime finder lands on Outer 0x08 / Flags 0x10 / Class 0x18 by
+			 * its own structural tests, and Hex-Rays shows seven sites copying
+			 * dword [ptr + 0x20] into an FName right before FName::ToString. */
+			.UObjectName = 0x20,
+			.UObjectFlags = 0x10,
+			.UObjectIndex = 0x14,
+			.UObjectClass = 0x18,
+			.UObjectOuter = 0x08,
 		},
 		{
 			.Build = EBuild::v42_40,
@@ -190,8 +193,11 @@ namespace
 
 		ObjectArray::Init(Profile.GObjectsRVA, Profile.ElementsPerChunk);
 
-		/* The object pointer inside each item is obfuscated, so the item size can't be probed. */
+		/* The object pointer inside each item is obfuscated, so the item size can't be probed.
+		 * This call is what makes the value final; the number printed by the probe above is
+		 * the plaintext guess and does not apply to this build. */
 		ObjectArray::InitItemLayout(Profile.ItemSize, 0x0);
+		std::cerr << std::format("[Fortnite] item layout: size 0x{:X}, encrypted low dword at +0x{:X}\n", Profile.ItemSize, Profile.ItemEncodedLowOffset);
 
 		FName::Init(Profile.ToStringRVA, FName::EOffsetOverrideType::ToString);
 
