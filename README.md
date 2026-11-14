@@ -25,7 +25,12 @@ Same instruction family as 42.40 with the byte swap removed. Read out of
 | `FName` | 4 bytes, id at `+0x0` | `((id - 1) ^ 0x6F01622B) + 1`, outline number inside the pool entry |
 | `FName::ToString` | RVA `0x5E10` | — |
 | `FNamePool` | RVA `0x16C1C5C0` | block table at `+0x10`, stride 8 |
-| `UObject` | Name `0x18`, Flags `0x08`, Index `0x0C`, Class `0x10`, Outer `0x20` | — |
+| `UObject` | Outer `0x08`, Flags `0x10`, Index `0x14`, Class `0x18`, Name `0x20` | — |
+
+The `UObject` base is **rotated** against stock UE5 in this client: `Outer` sits right after the
+vtable and `Name` comes after `Class`. Hardcode all five — the finder cannot classify them
+because the raw `FName` ids are encrypted, and its name scan walks every object and faults on the
+odd non-`UObject` slot.
 
 Two differences that matter when porting the constants:
 
