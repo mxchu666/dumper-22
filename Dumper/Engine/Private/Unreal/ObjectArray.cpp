@@ -185,6 +185,15 @@ static void* ValidateDecodedObject(void* Object)
 		return Object;
 
 	static std::unordered_set<void*> KnownClasses;
+	static int32 CachedClassOffset = -1;
+
+	/* The offset is 0 until Off::Init runs; whatever was cached while probing the array
+	 * at the wrong offset is not a class pointer. */
+	if (CachedClassOffset != Off::UObject::Class)
+	{
+		CachedClassOffset = Off::UObject::Class;
+		KnownClasses.clear();
+	}
 
 	void* Class = *reinterpret_cast<void**>(static_cast<uint8_t*>(Object) + Off::UObject::Class);
 
