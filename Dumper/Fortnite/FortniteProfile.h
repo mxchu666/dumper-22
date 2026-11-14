@@ -78,6 +78,10 @@ namespace Fortnite
 		int32_t UObjectIndex;
 		int32_t UObjectClass;
 		int32_t UObjectOuter;
+
+		/* UClass::CastFlags; -1 lets the finder resolve it. Set it here when the build
+		 * defeats both the name lookup and the meta-class fallback. */
+		int32_t UClassCastFlags;
 	};
 
 	/* Profile of the running build, or nullptr when this build isn't in the table. */
@@ -110,4 +114,8 @@ namespace Fortnite
 	 * start of Generator::InitEngineCore().
 	 */
 	void InitEngineCore();
+
+	/* Prints the resolved offsets and probes a few well-known classes by name.
+	 * Call right after Off::Init(); needs both the object array and FName working. */
+	void DumpOffsetDiagnostics();
 }

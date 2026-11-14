@@ -49,6 +49,9 @@ void Generator::InitEngineCore()
 	Fortnite::InitEngineCore();
 
 	Off::Init();
+
+	Fortnite::DumpOffsetDiagnostics();
+
 	PropertySizes::Init();
 
 	CALL_PLATFORM_SPECIFIC_FUNCTION(Off::InSDK::ProcessEvent::InitPE); // Must be at this position, relies on offsets initialized in Off::Init()

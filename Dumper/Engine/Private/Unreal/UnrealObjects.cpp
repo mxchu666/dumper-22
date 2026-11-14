@@ -756,7 +756,18 @@ bool UEStruct::HasMembers() const
 
 EClassCastFlags UEClass::GetCastFlags() const
 {
-	return *reinterpret_cast<EClassCastFlags*>(Object + Off::UClass::CastFlags);
+	/* IsA() runs over every decoded slot of the object array, including the occasional
+	 * slot that decodes to a readable address that is not a UObject. Reading through
+	 * Class + CastFlags would fault on those, and CastFlags is -1 when the finder failed. */
+	if (!Object || Off::UClass::CastFlags < 0)
+		return EClassCastFlags::None;
+
+	const uint8_t* Field = static_cast<const uint8_t*>(Object) + Off::UClass::CastFlags;
+
+	if (Platform::IsBadReadPtr(Field))
+		return EClassCastFlags::None;
+
+	return *reinterpret_cast<const EClassCastFlags*>(Field);
 }
 
 std::string UEClass::StringifyCastFlags() const

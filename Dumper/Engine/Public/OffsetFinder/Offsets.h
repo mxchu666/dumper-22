@@ -232,9 +232,13 @@ namespace Off
 
 	namespace UClass
 	{
-		inline int32 CastFlags;
+		inline int32 CastFlags; // !!!Must be initialized before IsA is used!!!
 		inline int32 ClassDefaultObject;
 		inline int32 ImplementedInterfaces;
+
+		/* Manual override, -1 means "let OffsetFinder resolve it". Set this when the
+		 * build defeats both the name lookup and the meta-class fallback. */
+		inline int32 CastFlagsOverride = -1;
 	}
 
 	namespace FInstancedStruct

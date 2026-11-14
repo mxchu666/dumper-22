@@ -3,6 +3,7 @@
 #include <fstream>
 #include <format>
 #include <filesystem>
+#include <unordered_set>
 
 #include "Unreal/ObjectArray.h"
 #include "OffsetFinder/Offsets.h"
@@ -170,6 +171,34 @@ bool IsAddressValidGObjects(const uintptr_t Address, const FChunkedFixedUObjectA
 }
 
 
+/* A decoded slot can land on a readable address that is not a UObject: a freed slot that
+ * was never tagged, or one being written at the moment it is read. Such an object hands
+ * out a fake Class pointer, and IsA/GetName fault on it, so the class field is validated
+ * before the slot is used. Classes are cached because a real object always points at one
+ * of a few thousand UClasses. */
+static void* ValidateDecodedObject(void* Object)
+{
+	if (!Object || Platform::IsBadReadPtr(Object))
+		return nullptr;
+
+	if (Off::UObject::Class <= 0)
+		return Object;
+
+	static std::unordered_set<void*> KnownClasses;
+
+	void* Class = *reinterpret_cast<void**>(static_cast<uint8_t*>(Object) + Off::UObject::Class);
+
+	if (!KnownClasses.contains(Class))
+	{
+		if (!Class || Platform::IsBadReadPtr(Class))
+			return nullptr;
+
+		KnownClasses.insert(Class);
+	}
+
+	return Object;
+}
+
 void ObjectArray::InitializeFUObjectItem(uint8_t* FirstItemPtr)
 {
 	for (int i = 0x0; i < 0x20; i += 4)
@@ -329,10 +358,7 @@ void ObjectArray::Init(bool bScanAllMemory, const char* const ModuleName)
 
 				void* Object = DecryptObjectPtr ? DecryptObjectPtr(ItemPtr, FUObjectItemOffset) : *reinterpret_cast<void**>(ItemPtr + FUObjectItemOffset);
 
-				if (Object && Platform::IsBadReadPtr(Object))
-					return nullptr;
-
-				return Object;
+				return ValidateDecodedObject(Object);
 			};
 			
 			uint8_t* ChunksPtr = DecryptPtr(*reinterpret_cast<uint8_t**>(GObjects + Off::FUObjectArray::GetObjectsOffset()));
@@ -416,11 +442,7 @@ void ObjectArray::Init(int32 GObjectsOffset, int32 ElementsPerChunk, const FChun
 
 		void* Object = DecryptObjectPtr ? DecryptObjectPtr(ItemPtr, FUObjectItemOffset) : *reinterpret_cast<void**>(ItemPtr + FUObjectItemOffset);
 
-		/* A slot being allocated can be read half-written and decode to an unreadable pointer */
-		if (Object && Platform::IsBadReadPtr(Object))
-			return nullptr;
-
-		return Object;
+		return ValidateDecodedObject(Object);
 	};
 
 	uint8_t* ChunksPtr = DecryptPtr(*reinterpret_cast<uint8_t**>(GObjects + Off::FUObjectArray::GetObjectsOffset()));

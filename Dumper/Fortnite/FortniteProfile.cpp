@@ -4,6 +4,7 @@
 #include <iostream>
 #include <format>
 #include <string>
+#include <unordered_map>
 
 #include "Unreal/ObjectArray.h"
 #include "Unreal/UnrealTypes.h"
@@ -46,6 +47,7 @@ namespace
 			.UObjectIndex = 0x14,
 			.UObjectClass = 0x18,
 			.UObjectOuter = 0x08,
+			.UClassCastFlags = -1,
 		},
 		{
 			.Build = EBuild::v42_40,
@@ -72,6 +74,7 @@ namespace
 			.UObjectIndex = 0x0C,
 			.UObjectClass = 0x10,
 			.UObjectOuter = 0x20,
+			.UClassCastFlags = -1,
 		},
 	};
 
@@ -162,12 +165,13 @@ namespace
 	void DumpObjectArrayDiagnostics(const FBuildProfile& Profile)
 	{
 		const int32 Num = ObjectArray::Num();
+		const int32 SweepLimit = Num < 0x40000 ? Num : 0x40000;
 
 		int32 Good = 0;
 		int32 BadClass = 0;
 		int32 Unreadable = 0;
 
-		for (int32 i = 0; i < Num; i++)
+		for (int32 i = 0; i < SweepLimit; i++)
 		{
 			uint64 Raw;
 			uint32 Low;
@@ -285,6 +289,7 @@ namespace
 		Off::UObject::IndexOverride = Profile.UObjectIndex;
 		Off::UObject::ClassOverride = Profile.UObjectClass;
 		Off::UObject::OuterOverride = Profile.UObjectOuter;
+		Off::UClass::CastFlagsOverride = Profile.UClassCastFlags;
 
 		DumpObjectArrayDiagnostics(Profile);
 	}
@@ -344,5 +349,86 @@ namespace Fortnite
 		}
 
 		ApplyObfuscatedProfile(*Profile);
+	}
+
+	/* Runs after Off::Init(): one line with every offset the finders produced, then a
+	 * lookup of the classes the very first finders need. If these resolve, the dump has
+	 * a working base; if they print <not found>, the diagnostic above says which half is
+	 * broken (array or names). */
+	void DumpOffsetDiagnostics()
+	{
+		const FBuildProfile* Profile = GetProfile();
+
+		if (!Profile || !Profile->bObfuscated)
+			return;
+
+		std::cerr << std::format(
+			"[Fortnite] offsets: Class 0x{:X} Name 0x{:X} Outer 0x{:X} Flags 0x{:X} Index 0x{:X} "
+			"CastFlags 0x{:X} Children 0x{:X} Super 0x{:X} Next 0x{:X}\n",
+			Off::UObject::Class, Off::UObject::Name, Off::UObject::Outer, Off::UObject::Flags,
+			Off::UObject::Index, Off::UClass::CastFlags, Off::UStruct::Children,
+			Off::UStruct::SuperStruct, Off::UField::Next);
+
+		auto Report = [](const char* Name, EClassCastFlags Required)
+		{
+			UEObject Obj = ObjectArray::FindObjectFast<UEObject>(Name, Required);
+			void* Class = Obj ? Obj.GetClass().GetAddress() : nullptr;
+
+			std::cerr << std::format("  {:16} 0x{:X} class={} castflags=0x{:X}\n",
+				Name,
+				reinterpret_cast<uintptr_t>(Obj.GetAddress()),
+				Class ? UEObject(Class).GetName() : std::string("<none>"),
+				Class ? static_cast<uint64>(UEClass(Class).GetCastFlags()) : 0ull);
+		};
+
+		Report("Actor", EClassCastFlags::Actor);
+		Report("Class", EClassCastFlags::Class);
+		Report("Struct", EClassCastFlags::Struct);
+		Report("Function", EClassCastFlags::Function);
+		Report("Object", EClassCastFlags::None);
+
+		/* Array integrity: every live UObject's class has the same class (the meta-class).
+		 * A mis-decoded slot shows up as a stray class-of-class value. */
+		const int32 SampleLimit = ObjectArray::Num() < 0x8000 ? ObjectArray::Num() : 0x8000;
+
+		int32 Live = 0;
+		std::unordered_map<void*, int32> ClassOfClassCounts;
+
+		for (int32 i = 0; i < SampleLimit; i++)
+		{
+			void* Obj = ObjectArray::GetByIndex(i).GetAddress();
+
+			if (!Obj || Platform::IsBadReadPtr(Obj))
+				continue;
+
+			Live++;
+
+			void* Class = *reinterpret_cast<void**>(static_cast<uint8_t*>(Obj) + Off::UObject::Class);
+
+			if (Platform::IsBadReadPtr(Class))
+				continue;
+
+			void* ClassOfClass = *reinterpret_cast<void**>(static_cast<uint8_t*>(Class) + Off::UObject::Class);
+
+			ClassOfClassCounts[ClassOfClass]++;
+		}
+
+		void* TopClassOfClass = nullptr;
+		int32 TopCount = 0;
+		int32 Distinct = 0;
+
+		for (const auto& [Value, Count] : ClassOfClassCounts)
+		{
+			Distinct++;
+
+			if (Count > TopCount)
+			{
+				TopCount = Count;
+				TopClassOfClass = Value;
+			}
+		}
+
+		std::cerr << std::format("[Fortnite] array sample: {} live of {}, {} distinct class-of-class, top 0x{:X} x{}\n",
+			Live, SampleLimit, Distinct, reinterpret_cast<uintptr_t>(TopClassOfClass), TopCount);
 	}
 }

@@ -344,7 +344,7 @@ void Off::Init()
 	::NameArray::PostInit();
 
 	// Castflags needs to stay here since the FindChildOffset() uses CastFlags
-	Off::UClass::CastFlags = OffsetFinder::FindCastFlagsOffset();
+	Off::UClass::CastFlags = Off::UClass::CastFlagsOverride != -1 ? Off::UClass::CastFlagsOverride : OffsetFinder::FindCastFlagsOffset();
 	std::cerr << std::format("Off::UClass::CastFlags: 0x{:X}\n", Off::UClass::CastFlags);
 
 	Off::UStruct::Children = OffsetFinder::FindChildOffset();
@@ -362,7 +362,7 @@ void Off::Init()
 	Off::UStruct::MinAlignment = OffsetFinder::FindMinAlignmentOffset();
 	std::cerr << std::format("Off::UStruct::MinAlignment: 0x{:X}\n", Off::UStruct::MinAlignment);
 
-	Off::UClass::CastFlags = OffsetFinder::FindCastFlagsOffset();
+	Off::UClass::CastFlags = Off::UClass::CastFlagsOverride != -1 ? Off::UClass::CastFlagsOverride : OffsetFinder::FindCastFlagsOffset();
 	std::cerr << std::format("Off::UClass::CastFlags: 0x{:X}\n", Off::UClass::CastFlags);
 
 	// Castflags become available for use

@@ -914,19 +914,121 @@ int32_t OffsetFinder::FindFunctionNativeFuncOffset()
 /* UClass */
 int32_t OffsetFinder::FindCastFlagsOffset()
 {
+	constexpr int32_t ScanEnd = 0x400;
+
 	std::vector<std::pair<void*, EClassCastFlags>> Infos;
 
 	Infos.push_back({ ObjectArray::FindObjectFast("Actor").GetAddress(), EClassCastFlags::Actor });
 	Infos.push_back({ ObjectArray::FindObjectFast("Class").GetAddress(), EClassCastFlags::Field | EClassCastFlags::Struct | EClassCastFlags::Class });
 
-	/* UE 5.7 grew UStruct enough to push ClassCastFlags past the default 0x1A0 cap
-	 * (38.00 reports IsA at Class-1 when this comes back as OffsetNotFound). */
-	const int32_t Offset = FindOffset(Infos, OffsetFinderMinValue, 0x400);
+	/* UE 5.7 grew UStruct enough to push CastFlags past the default 0x1A0 cap. */
+	const int32_t Offset = FindOffset(Infos, OffsetFinderMinValue, ScanEnd);
 
-	if (Offset >= 0)
-		std::cerr << std::format("Dumper-7: UClass::CastFlags found at 0x{:X}\n", Offset);
+	if (Offset != OffsetNotFound)
+	{
+		std::cerr << std::format("Dumper-7: UClass::CastFlags found by name at 0x{:X}\n", Offset);
+		return Offset;
+	}
 
-	return Offset;
+	/* Names can fail to resolve on obfuscated builds, which leaves the search above with
+	 * nullptr entries and no candidates at all. The meta-class is the one UClass whose
+	 * Class pointer points at itself, so it can be found without touching the name table;
+	 * its CastFlags are exactly Field|Struct|Class. */
+	void* MetaClass = nullptr;
+
+	const int32_t NumObjects = ObjectArray::Num();
+	const int32_t SearchLimit = NumObjects < 0x10000 ? NumObjects : 0x10000;
+
+	for (int32_t i = 0; i < SearchLimit; i++)
+	{
+		void* Candidate = ObjectArray::GetByIndex(i).GetAddress();
+
+		if (!Candidate || Platform::IsBadReadPtr(Candidate))
+			continue;
+
+		void* CandidateClass = *reinterpret_cast<void**>(static_cast<uint8_t*>(Candidate) + Off::UObject::Class);
+
+		if (CandidateClass == Candidate)
+		{
+			MetaClass = Candidate;
+			break;
+		}
+	}
+
+	if (!MetaClass)
+	{
+		std::cerr << "Dumper-7: UClass::CastFlags not found, and the meta-class could not be located\n";
+		return OffsetNotFound;
+	}
+
+	/* CastFlags are cumulative (the UClass meta-class holds Class|Struct|Field), so a valid
+	 * value is any non-zero combination of the known flags. Pointers and large integers fail
+	 * this mask, and a single object can hold the same value in more than one member, so
+	 * every candidate offset is scored against a sample of UClass objects as well. */
+	constexpr uint64 KnownCastFlagMask = 0x7F9FFFFFFFFFFFFFull; // OR of every EClassCastFlags value
+
+	auto ScoreOffset = [MetaClass](int32 CandidateOffset, int32& OutChecked) -> int32
+	{
+		int32 Checked = 0;
+		int32 Matching = 0;
+
+		for (UEObject Obj : ObjectArray())
+		{
+			if (Checked >= 0x200)
+				break;
+
+			void* Addr = Obj.GetAddress();
+
+			if (!Addr || Platform::IsBadReadPtr(Addr))
+				continue;
+
+			void* Cls = *reinterpret_cast<void**>(static_cast<uint8_t*>(Addr) + Off::UObject::Class);
+
+			if (Cls != MetaClass)
+				continue;
+
+			Checked++;
+
+			const uint64 Value = *reinterpret_cast<uint64*>(static_cast<uint8_t*>(Addr) + CandidateOffset);
+
+			if (Value != 0 && (Value & ~KnownCastFlagMask) == 0)
+				Matching++;
+		}
+
+		OutChecked = Checked;
+
+		return (Checked >= 0x20 && Matching * 20 >= Checked * 19) ? Matching : -1;
+	};
+
+	int32_t BestOffset = OffsetNotFound;
+	int32_t BestScore = -1;
+	int32_t PrintedCandidates = 0;
+
+	for (int32_t Candidate = 0x28; Candidate < ScanEnd; Candidate += sizeof(void*))
+	{
+		if (*reinterpret_cast<uint64*>(static_cast<uint8_t*>(MetaClass) + Candidate)
+			!= static_cast<uint64>(EClassCastFlags::Field | EClassCastFlags::Struct | EClassCastFlags::Class))
+		{
+			continue;
+		}
+
+		int32_t Checked = 0;
+		const int32_t Score = ScoreOffset(Candidate, Checked);
+
+		if (PrintedCandidates++ < 6)
+			std::cerr << std::format("Dumper-7: CastFlags candidate 0x{:X} score {}/{}\n", Candidate, Score, Checked);
+
+		if (Score > BestScore)
+		{
+			BestScore = Score;
+			BestOffset = Candidate;
+		}
+	}
+
+	std::cerr << std::format("Dumper-7: UClass::CastFlags meta-class 0x{:X}, fallback offset 0x{:X} (score {})\n",
+		reinterpret_cast<uintptr_t>(MetaClass), BestOffset, BestScore);
+
+	return BestOffset;
 }
 
 int32_t OffsetFinder::FindDefaultObjectOffset()
