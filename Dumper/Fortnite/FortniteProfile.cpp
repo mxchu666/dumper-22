@@ -156,6 +156,70 @@ namespace
 			"\t}}", P.ItemFreeTagMask, P.ItemEncodedLowOffset, P.ItemKey, P.ItemKeepMask);
 	}
 
+	/* One full sweep to prove the array decodes the way the engine reads it: every live
+	 * slot must decode to a pointer whose Class field is readable. Prints the first
+	 * objects so a wrong base offset is visible before the offset finders run. */
+	void DumpObjectArrayDiagnostics(const FBuildProfile& Profile)
+	{
+		const int32 Num = ObjectArray::Num();
+
+		int32 Good = 0;
+		int32 BadClass = 0;
+		int32 Unreadable = 0;
+
+		for (int32 i = 0; i < Num; i++)
+		{
+			uint64 Raw;
+			uint32 Low;
+			uint32 Serial;
+			void* Obj = ObjectArray::DebugDecodeItem(i, Raw, Low, Serial);
+
+			if (!Obj || Platform::IsBadReadPtr(Obj))
+			{
+				Unreadable++;
+				continue;
+			}
+
+			void* Class = *reinterpret_cast<void**>(static_cast<uint8_t*>(Obj) + Profile.UObjectClass);
+
+			if (Platform::IsBadReadPtr(Class))
+			{
+				if (BadClass++ < 4)
+				{
+					std::cerr << std::format("  bad-class [0x{:X}] obj=0x{:X} class=0x{:X} raw=0x{:016X} low=0x{:08X} serial=0x{:X}\n",
+						static_cast<uint32>(i), reinterpret_cast<uintptr_t>(Obj), reinterpret_cast<uintptr_t>(Class), Raw, Low, Serial);
+				}
+
+				continue;
+			}
+
+			Good++;
+		}
+
+		std::cerr << std::format("[Fortnite] objects: {} readable, {} bad-class, {} free/unreadable (NumElements 0x{:X})\n",
+			Good, BadClass, Unreadable, Num);
+
+		for (int32 i = 0; i < 0x18; i++)
+		{
+			uint64 Raw;
+			uint32 Low;
+			uint32 Serial;
+			void* Obj = ObjectArray::DebugDecodeItem(i, Raw, Low, Serial);
+
+			void* Class = nullptr;
+			std::string Name = "None";
+
+			if (Obj && !Platform::IsBadReadPtr(Obj))
+			{
+				Class = *reinterpret_cast<void**>(static_cast<uint8_t*>(Obj) + Profile.UObjectClass);
+				Name = FName(static_cast<uint8_t*>(Obj) + Profile.UObjectName).ToString();
+			}
+
+			std::cerr << std::format("  [{:04X}] obj=0x{:X} class=0x{:X} name={}\n",
+				static_cast<uint32>(i), reinterpret_cast<uintptr_t>(Obj), reinterpret_cast<uintptr_t>(Class), Name);
+		}
+	}
+
 	void ApplyObfuscatedProfile(const FBuildProfile& Profile)
 	{
 		static std::string ObjectArrayDecryptor;
@@ -221,6 +285,8 @@ namespace
 		Off::UObject::IndexOverride = Profile.UObjectIndex;
 		Off::UObject::ClassOverride = Profile.UObjectClass;
 		Off::UObject::OuterOverride = Profile.UObjectOuter;
+
+		DumpObjectArrayDiagnostics(Profile);
 	}
 }
 

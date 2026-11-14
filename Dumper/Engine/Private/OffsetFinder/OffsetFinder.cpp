@@ -919,7 +919,14 @@ int32_t OffsetFinder::FindCastFlagsOffset()
 	Infos.push_back({ ObjectArray::FindObjectFast("Actor").GetAddress(), EClassCastFlags::Actor });
 	Infos.push_back({ ObjectArray::FindObjectFast("Class").GetAddress(), EClassCastFlags::Field | EClassCastFlags::Struct | EClassCastFlags::Class });
 
-	return FindOffset(Infos);
+	/* UE 5.7 grew UStruct enough to push ClassCastFlags past the default 0x1A0 cap
+	 * (38.00 reports IsA at Class-1 when this comes back as OffsetNotFound). */
+	const int32_t Offset = FindOffset(Infos, OffsetFinderMinValue, 0x400);
+
+	if (Offset >= 0)
+		std::cerr << std::format("Dumper-7: UClass::CastFlags found at 0x{:X}\n", Offset);
+
+	return Offset;
 }
 
 int32_t OffsetFinder::FindDefaultObjectOffset()

@@ -485,6 +485,35 @@ void ObjectArray::DumpObjectsWithProperties(const fs::path& Path, bool bWithPath
 }
 
 
+void* ObjectArray::DebugDecodeItem(int32 Index, uint64& OutRaw, uint32& OutLow, uint32& OutSerial)
+{
+	OutRaw = 0x0;
+	OutLow = 0x0;
+	OutSerial = 0x0;
+
+	if (!GObjects || Index < 0 || Index >= Num())
+		return nullptr;
+
+	const int32 ChunkIndex = Index / NumElementsPerChunk;
+	const int32 InChunkIdx = Index % NumElementsPerChunk;
+
+	uint8_t* ChunkTable = DecryptPtr(*reinterpret_cast<uint8_t**>(GObjects));
+	if (!ChunkTable || Platform::IsBadReadPtr(ChunkTable))
+		return nullptr;
+
+	uint8_t* Chunk = reinterpret_cast<uint8_t**>(ChunkTable)[ChunkIndex];
+	if (!Chunk || Platform::IsBadReadPtr(Chunk))
+		return nullptr;
+
+	uint8_t* Item = Chunk + (InChunkIdx * SizeOfFUObjectItem);
+
+	OutRaw = *reinterpret_cast<uint64*>(Item);
+	OutLow = *reinterpret_cast<uint32*>(Item + 0x8);
+	OutSerial = *reinterpret_cast<uint32*>(Item + 0x10);
+
+	return DecryptObjectPtr ? DecryptObjectPtr(Item, FUObjectItemInitialOffset) : *reinterpret_cast<void**>(Item + FUObjectItemInitialOffset);
+}
+
 int32 ObjectArray::Num()
 {
 	return DecryptInt(*reinterpret_cast<int32*>(GObjects + Off::FUObjectArray::GetNumElementsOffset()));

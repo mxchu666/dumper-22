@@ -64,6 +64,9 @@ public:
 	static void DumpObjects(const fs::path& Path, bool bWithPathname = false);
 	static void DumpObjectsWithProperties(const fs::path& Path, bool bWithPathname = false);
 
+	/* Reads one slot raw, bypassing the decryption lambda's null filtering. Diagnostics only. */
+	static void* DebugDecodeItem(int32 Index, uint64& OutRaw, uint32& OutLow, uint32& OutSerial);
+
 	static int32 Num();
 	static int32 Max();
 	static int32 NumChunks();
